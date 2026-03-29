@@ -2,7 +2,7 @@
 
 Block distracting websites to help you stay focused. Manages blocked sites directly in `/etc/hosts`.
 
-![alt text](images/image.png)
+![alt text](images/screenshot-01.png)
 
 ## Features
 
