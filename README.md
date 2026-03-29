@@ -3,6 +3,7 @@
 Block distracting websites to help you stay focused. Uses `/etc/hosts` to block sites system-wide.
 
 ![alt text](images/screenshot-01.png)
+![alt text](images/image.png)
 
 ## Features
 
