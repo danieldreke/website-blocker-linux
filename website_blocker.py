@@ -84,7 +84,7 @@ def apply_to_hosts(rows):
 class App(Gtk.Window):
     def __init__(self):
         super().__init__(title="Website Blocker")
-        self.set_default_size(480, 360)
+        self.set_default_size(320, 240)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(10)
 
@@ -146,14 +146,13 @@ class App(Gtk.Window):
         spacer = Gtk.Box()
         btn_box.pack_start(spacer, True, True, 0)
 
-        apply_btn = self._icon_button("Save as root", "document-save")
+        apply_btn = self._icon_button("Save", "document-save")
         apply_btn.connect("clicked", self.on_save)
         btn_box.pack_start(apply_btn, False, False, 0)
 
         discard_btn = self._icon_button("Discard", "document-revert")
         discard_btn.connect("clicked", self.on_discard)
-        if DEBUG:
-            btn_box.pack_start(discard_btn, False, False, 0)
+        # btn_box.pack_start(discard_btn, False, False, 0)
 
         close_btn = self._icon_button("Close", "window-close")
         close_btn.connect("clicked", lambda _: self.do_close())
@@ -196,13 +195,13 @@ class App(Gtk.Window):
                 self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
             return
         if not self._domain_re.match(new_text.strip()):
-            self.set_status(f"'{new_text}' is not a valid domain.")
+            self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> is not a valid domain.", markup=True)
             if not self.store[path][1]:
                 self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
             return
         for i, row in enumerate(self.store):
             if row[1] == new_text and str(i) != path:
-                self.set_status(f"'{new_text}' already exists.")
+                self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> already exists.", markup=True)
                 if not self.store[path][1]:
                     self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
                 return
@@ -227,14 +226,14 @@ class App(Gtk.Window):
             parent=self,
             message_type=Gtk.MessageType.QUESTION,
             buttons=Gtk.ButtonsType.NONE,
-            text=f"Delete '{site}'?",
+            text=f"Delete {site}?",
         )
         dialog.add_button("Yes", Gtk.ResponseType.YES)
         dialog.add_button("No", Gtk.ResponseType.NO)
         if dialog.run() == Gtk.ResponseType.YES:
             model.remove(it)
             self._dirty = True
-            self.set_status(f"'{site}' deleted. Remember to save.")
+            self.set_status(f"<i>{GLib.markup_escape_text(site)}</i> deleted. Remember to save.", markup=True)
         dialog.destroy()
 
     def do_close(self):
