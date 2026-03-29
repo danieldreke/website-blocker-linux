@@ -1,14 +1,14 @@
 # Website Blocker for Linux
 
-Block distracting websites to help you stay focused. Manages blocked sites directly in `/etc/hosts`.
+Block distracting websites to help you stay focused. Uses `/etc/hosts` to block sites system-wide.
 
 ![alt text](images/screenshot-01.png)
 
 ## Features
 
 - Block and unblock websites instantly
-- Disable entries temporarily without deleting them
-- Optionally block the `www.` variant of each site (default enabled)
+- Unblock websites temporarily via toggle
+- Blocks `www.` variant of each site by default
 
 ## Requirements
 
