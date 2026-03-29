@@ -42,12 +42,19 @@ Blocked sites are written to `/etc/hosts` as `127.0.0.1 example.com`, wrapped in
 # --- Website Blocker END ---
 ```
 
-Disabled entries are commented out with `#` and preserved for easy re-enabling.
+To allow temporary unblocking, disabled entries are commented out with `#` in `/etc/hosts`.
+
+## Limitations
+
+- For blocking to work in a browser, its DNS cache must be cleared after saving changes.
+- Blocks access at the system level — a user can edit `/etc/hosts` directly to bypass it.
+- Browser extensions, VPNs, proxy or private DNS settings can bypass hosts-based blocking.
+- Only blocks the exact domains added. Subdomains (e.g. `sub.example.com`) are not blocked unless added explicitly.
 
 ## Notes
 
 - Saving requires root access via `pkexec`.
-- Changes take effect immediately but browsers may need their cache cleared:
+- Changes take effect immediately but browsers may need their DNS cache cleared:
     - Brave: Open `brave://net-internals/#dns` <a href="brave://net-internals/#dns">🔗</a> and click <kbd>Clear host cache</kbd>
     - Firefox: Open `about:networking#dns` <a href="about:networking#dns">🔗</a> and click <kbd>Clear DNS Cache</kbd>
     - Chrome: Open `chrome://net-internals/#dns` <a href="chrome://net-internals/#dns">🔗</a> and click <kbd>Clear host cache</kbd>
