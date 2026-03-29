@@ -91,7 +91,7 @@ class App(Gtk.Window):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add(box)
 
-        self._dirty = False
+        self._unsaved_changes = False
         self.store = Gtk.ListStore(bool, str, bool)
         for row in load():
             self.store.append(list(row))
@@ -106,17 +106,19 @@ class App(Gtk.Window):
         treeview.append_column(Gtk.TreeViewColumn("", toggle_renderer, active=0))
 
         self._editing_path = None
+        self.prefix_renderer = Gtk.CellRendererText()
         text_renderer = Gtk.CellRendererText()
         text_renderer.set_property("editable", True)
         text_renderer.connect("edited", self.on_edited)
         text_renderer.connect("editing-started", self.on_editing_started)
-        site_col = Gtk.TreeViewColumn("Blocked Websites", text_renderer, text=1)
-        site_col.set_expand(True)
-        treeview.append_column(site_col)
-
-        www_renderer = Gtk.CellRendererToggle()
-        www_renderer.connect("toggled", self.on_www_toggled)
-        treeview.append_column(Gtk.TreeViewColumn("Block www", www_renderer, active=2))
+        self.site_col = Gtk.TreeViewColumn("Blocked Websites")
+        self.site_col.pack_start(self.prefix_renderer, False)
+        self.site_col.pack_start(text_renderer, True)
+        self.site_col.set_expand(True)
+        self.site_col.set_cell_data_func(self.prefix_renderer, self._www_prefix_func)
+        self.site_col.add_attribute(text_renderer, "text", 1)
+        treeview.append_column(self.site_col)
+        treeview.connect("button-press-event", self.on_cell_click)
 
         self.scroll = Gtk.ScrolledWindow()
         self.scroll.set_vexpand(True)
@@ -167,11 +169,28 @@ class App(Gtk.Window):
 
     def on_toggled(self, _, path):
         self.store[path][0] = not self.store[path][0]
-        self._dirty = True
+        self._unsaved_changes = True
 
-    def on_www_toggled(self, _, path):
-        self.store[path][2] = not self.store[path][2]
-        self._dirty = True
+    def _www_prefix_func(self, col, cell, model, it, _):
+        cell.set_property("text", "[www.]")
+        cell.set_property("sensitive", model.get_value(it, 2))
+
+    def on_cell_click(self, widget, event):
+        from gi.repository import Gdk
+        if event.button != 1 or event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        result = widget.get_path_at_pos(int(event.x), int(event.y))
+        if not result:
+            return False
+        path, col, cell_x, _ = result
+        if col is not self.site_col:
+            return False
+        start, width = self.site_col.cell_get_position(self.prefix_renderer)
+        if cell_x < start + width:
+            self.store[path][2] = not self.store[path][2]
+            self._unsaved_changes = True
+            return True
+        return False
 
     def on_editing_started(self, _, editable, path):
         self._editing_path = path
@@ -207,7 +226,7 @@ class App(Gtk.Window):
                 return
         is_new = not self.store[path][1]
         self.store[path][1] = new_text
-        self._dirty = True
+        self._unsaved_changes = True
         if is_new:
             self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> added. Remember to save.", markup=True)
 
@@ -215,7 +234,7 @@ class App(Gtk.Window):
         it = self.store.append([True, "", True])
         path = self.store.get_path(it)
         self.treeview.set_cursor(path, self.treeview.get_column(1), True)
-        self._dirty = True
+        self._unsaved_changes = True
 
     def on_delete(self, _):
         model, it = self.treeview.get_selection().get_selected()
@@ -232,12 +251,12 @@ class App(Gtk.Window):
         dialog.add_button("No", Gtk.ResponseType.NO)
         if dialog.run() == Gtk.ResponseType.YES:
             model.remove(it)
-            self._dirty = True
+            self._unsaved_changes = True
             self.set_status(f"<i>{GLib.markup_escape_text(site)}</i> deleted. Remember to save.", markup=True)
         dialog.destroy()
 
     def do_close(self):
-        if self._dirty:
+        if self._unsaved_changes:
             dialog = Gtk.MessageDialog(
                 parent=self,
                 message_type=Gtk.MessageType.QUESTION,
@@ -254,7 +273,7 @@ class App(Gtk.Window):
         return True
 
     def on_discard(self, _):
-        if not self._dirty:
+        if not self._unsaved_changes:
             self.set_status("No changes to discard.")
             return
         dialog = Gtk.MessageDialog(
@@ -269,17 +288,17 @@ class App(Gtk.Window):
             self.store.clear()
             for row in load():
                 self.store.append(list(row))
-            self._dirty = False
+            self._unsaved_changes = False
             self.set_status("Changes discarded.")
         dialog.destroy()
 
     def on_save(self, _):
-        if not self._dirty:
+        if not self._unsaved_changes:
             self.set_status("No changes to save.")
             return
         rows = [(row[0], row[1], row[2]) for row in self.store]
         if apply_to_hosts(rows):
-            self._dirty = False
+            self._unsaved_changes = False
             self.set_status(f"Saved to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>. Please clear your browser cache.", markup=True)
         else:
             self.set_status(f"Failed to save to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>", markup=True)
