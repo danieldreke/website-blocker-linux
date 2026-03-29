@@ -8,6 +8,9 @@ import os
 
 DEBUG = 0
 
+WINDOW_WIDTH = 400
+WINDOW_HEIGHT = 300
+
 HOSTS_FILEPATH = "/etc/hosts"
 MARKER_START = "# --- Website Blocker START ---"
 MARKER_END = "# --- Website Blocker END ---"
@@ -84,7 +87,7 @@ def apply_to_hosts(rows):
 class App(Gtk.Window):
     def __init__(self):
         super().__init__(title="Website Blocker")
-        self.set_default_size(320, 240)
+        self.set_default_size(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(10)
 
@@ -122,7 +125,7 @@ class App(Gtk.Window):
 
         self.scroll = Gtk.ScrolledWindow()
         self.scroll.set_vexpand(True)
-        self.scroll.set_min_content_height(self.get_default_size()[1] // 2)
+        self.scroll.set_min_content_height(WINDOW_HEIGHT // 2)
         self.scroll.add(treeview)
         box.pack_start(self.scroll, True, True, 0)
 
