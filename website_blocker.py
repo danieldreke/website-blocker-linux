@@ -109,6 +109,7 @@ class App(Gtk.Window):
         treeview.append_column(Gtk.TreeViewColumn("", toggle_renderer, active=0))
 
         self._editing_path = None
+        self._pending_text = None
         self.prefix_renderer = Gtk.CellRendererText()
         text_renderer = Gtk.CellRendererText()
         text_renderer.set_property("editable", True)
@@ -197,6 +198,14 @@ class App(Gtk.Window):
 
     def on_editing_started(self, _, editable, path):
         self._editing_path = path
+        if self._pending_text is not None:
+            text = self._pending_text
+            self._pending_text = None
+            def restore():
+                editable.set_text(text)
+                editable.set_position(len(text))
+                return False
+            GLib.idle_add(restore)
         editable.connect("key-press-event", self.on_edit_key)
 
     def on_edit_key(self, _, event):
@@ -211,21 +220,24 @@ class App(Gtk.Window):
     )
 
     def on_edited(self, _, path, new_text):
+        def restart_edit():
+            self.treeview.set_cursor(Gtk.TreePath(path), self.site_col, True)
+            return False
+
+        def reject(msg, markup=False):
+            self.set_status(msg, markup=markup)
+            self._pending_text = new_text
+            GLib.idle_add(restart_edit)
+
         if not new_text.strip():
-            self.set_status("Empty entry rejected.")
-            if not self.store[path][1]:
-                self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
+            reject("Empty entry rejected.")
             return
         if not self._domain_re.match(new_text.strip()):
-            self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> is not a valid domain.", markup=True)
-            if not self.store[path][1]:
-                self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
+            reject(f"<i>{GLib.markup_escape_text(new_text)}</i> is not a valid domain.", markup=True)
             return
         for i, row in enumerate(self.store):
             if row[1] == new_text and str(i) != path:
-                self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> already exists.", markup=True)
-                if not self.store[path][1]:
-                    self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
+                reject(f"<i>{GLib.markup_escape_text(new_text)}</i> already exists.", markup=True)
                 return
         is_new = not self.store[path][1]
         self.store[path][1] = new_text
@@ -236,8 +248,7 @@ class App(Gtk.Window):
     def on_add(self, _):
         it = self.store.append([True, "", True])
         path = self.store.get_path(it)
-        self.treeview.set_cursor(path, self.treeview.get_column(1), True)
-        self._unsaved_changes = True
+        self.treeview.set_cursor(path, self.site_col, True)
 
     def on_delete(self, _):
         model, it = self.treeview.get_selection().get_selected()
