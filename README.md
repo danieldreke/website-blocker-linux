@@ -11,7 +11,6 @@ Changes take effect immediately but browsers may need their DNS cache cleared:
 - Firefox: Open `about:networking#dns` <a href="about:networking#dns">🔗</a> and click <kbd>Clear DNS Cache</kbd>
 - Chrome: Open `chrome://net-internals/#dns` <a href="chrome://net-internals/#dns">🔗</a> and click <kbd>Clear host cache</kbd>
 
-
 ## Features
 
 - Block and unblock websites instantly

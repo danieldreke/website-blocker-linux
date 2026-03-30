@@ -39,20 +39,16 @@ def load():
         return rows
 
     lines = [l for l in match.group(1).splitlines() if l.strip()]
-    active = {parse_domain(l) for l in lines if not l.startswith("#")}
-    www_set = {d for d in active if d.startswith("www.")}
 
     for line in lines:
         if line.startswith("# "):
             inner = parse_domain(line[2:])
-            if inner.startswith("www."):
-                continue
-            rows.append((False, inner, f"www.{inner}" in www_set))
+            if not inner.startswith("www."):
+                rows.append((False, inner))
         else:
             domain = parse_domain(line)
-            if domain.startswith("www."):
-                continue
-            rows.append((True, domain, f"www.{domain}" in www_set))
+            if not domain.startswith("www."):
+                rows.append((True, domain))
     return rows
 
 
@@ -66,10 +62,9 @@ def apply_to_hosts(rows):
     )
 
     block = [MARKER_START]
-    for enabled, site, www in rows:
+    for enabled, site in rows:
         block.append(f"{LOOPBACK_IP} {site}" if enabled else f"# {LOOPBACK_IP} {site}")
-        if www:
-            block.append(f"{LOOPBACK_IP} www.{site}" if enabled else f"# {LOOPBACK_IP} www.{site}")
+        block.append(f"{LOOPBACK_IP} www.{site}" if enabled else f"# {LOOPBACK_IP} www.{site}")
     block.append(MARKER_END)
     block.append("")
 
@@ -95,7 +90,7 @@ class App(Gtk.Window):
         self.add(box)
 
         self._unsaved_changes = False
-        self.store = Gtk.ListStore(bool, str, bool)
+        self.store = Gtk.ListStore(bool, str)
         for row in load():
             self.store.append(list(row))
         self.store.set_sort_column_id(1, Gtk.SortType.ASCENDING)
@@ -103,26 +98,29 @@ class App(Gtk.Window):
         self.treeview = Gtk.TreeView(model=self.store)
         treeview = self.treeview
         treeview.set_headers_visible(True)
+        treeview.connect("row-activated", lambda tv, path, col: self.on_toggled(None, str(path)))
+        treeview.connect("motion-notify-event", self.on_mouse_motion)
 
         toggle_renderer = Gtk.CellRendererToggle()
         toggle_renderer.connect("toggled", self.on_toggled)
-        treeview.append_column(Gtk.TreeViewColumn("", toggle_renderer, active=0))
+        self.toggle_col = Gtk.TreeViewColumn("", toggle_renderer, active=0)
+        treeview.append_column(self.toggle_col)
 
         self._editing_path = None
         self._pending_text = None
         self.prefix_renderer = Gtk.CellRendererText()
-        text_renderer = Gtk.CellRendererText()
-        text_renderer.set_property("editable", True)
-        text_renderer.connect("edited", self.on_edited)
-        text_renderer.connect("editing-started", self.on_editing_started)
+        self.text_renderer = Gtk.CellRendererText()
+        self.text_renderer.set_property("editable", True)
+        self.text_renderer.connect("edited", self.on_edited)
+        self.text_renderer.connect("editing-started", self.on_editing_started)
         self.site_col = Gtk.TreeViewColumn("Blocked Websites")
         self.site_col.pack_start(self.prefix_renderer, False)
-        self.site_col.pack_start(text_renderer, True)
+        self.site_col.pack_start(self.text_renderer, True)
         self.site_col.set_expand(True)
         self.site_col.set_cell_data_func(self.prefix_renderer, self._www_prefix_func)
-        self.site_col.add_attribute(text_renderer, "text", 1)
+        self.site_col.set_cell_data_func(self.text_renderer, self._domain_text_func)
         treeview.append_column(self.site_col)
-        treeview.connect("button-press-event", self.on_cell_click)
+
 
         self.scroll = Gtk.ScrolledWindow()
         self.scroll.set_vexpand(True)
@@ -175,26 +173,22 @@ class App(Gtk.Window):
         self.store[path][0] = not self.store[path][0]
         self._unsaved_changes = True
 
+    def on_mouse_motion(self, widget, event):
+        from gi.repository import Gdk
+        result = widget.get_path_at_pos(int(event.x), int(event.y))
+        if result and result[1] is self.toggle_col:
+            cursor = Gdk.Cursor.new_from_name(widget.get_display(), "pointer")
+        else:
+            cursor = None
+        widget.get_window().set_cursor(cursor)
+
     def _www_prefix_func(self, col, cell, model, it, _):
         cell.set_property("text", "[www.]")
-        cell.set_property("sensitive", model.get_value(it, 2))
+        cell.set_property("sensitive", model.get_value(it, 0))
 
-    def on_cell_click(self, widget, event):
-        from gi.repository import Gdk
-        if event.button != 1 or event.type != Gdk.EventType.BUTTON_PRESS:
-            return False
-        result = widget.get_path_at_pos(int(event.x), int(event.y))
-        if not result:
-            return False
-        path, col, cell_x, _ = result
-        if col is not self.site_col:
-            return False
-        start, width = self.site_col.cell_get_position(self.prefix_renderer)
-        if cell_x < start + width:
-            self.store[path][2] = not self.store[path][2]
-            self._unsaved_changes = True
-            return True
-        return False
+    def _domain_text_func(self, col, cell, model, it, _):
+        cell.set_property("text", model.get_value(it, 1))
+        cell.set_property("sensitive", model.get_value(it, 0))
 
     def on_editing_started(self, _, editable, path):
         self._editing_path = path
@@ -246,7 +240,7 @@ class App(Gtk.Window):
             self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> added. Remember to save.", markup=True)
 
     def on_add(self, _):
-        it = self.store.append([True, "", True])
+        it = self.store.append([True, ""])
         path = self.store.get_path(it)
         self.treeview.set_cursor(path, self.site_col, True)
 
@@ -310,7 +304,7 @@ class App(Gtk.Window):
         if not self._unsaved_changes:
             self.set_status("No changes to save.")
             return
-        rows = [(row[0], row[1], row[2]) for row in self.store]
+        rows = [(row[0], row[1]) for row in self.store]
         if apply_to_hosts(rows):
             self._unsaved_changes = False
             self.set_status(f"Saved to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>. Please clear your browser cache.", markup=True)
