@@ -38,7 +38,7 @@ Installs to `~/.local/share/website-blocker/` and adds a launcher to your applic
 python3 uninstall.py
 ```
 
-Removes from application menu and deletes installed files. Does not remove blocked sites from `/etc/hosts` — you must edit it manually to unblock those.
+Removes blocked sites from `/etc/hosts` (requires root), removes the application menu entry, and deletes installed files.
 
 ## Usage
 
@@ -65,7 +65,7 @@ To allow temporary unblocking, disabled entries are commented out with `#`.
 
 ## Limitations
 
-- For blocking to work in a browser, its DNS cache must be cleared after changes.
+- For blocking to work in a browser, its DNS cache must be cleared after changes (see [Notes](#notes)).
 - Blocks access at the system level — a user can edit `/etc/hosts` directly to bypass it.
 - Browser extensions, VPNs, proxy or private DNS settings can bypass hosts-based blocking.
 - Only blocks the exact domains added. Subdomains (e.g. `sub.example.com`) are not blocked unless added explicitly.
