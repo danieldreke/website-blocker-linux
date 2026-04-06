@@ -152,7 +152,7 @@ class App(Gtk.Window):
 
         apply_btn = self._icon_button("Save", "document-save")
         apply_btn.connect("clicked", self.on_save)
-        btn_box.pack_start(apply_btn, False, False, 0)
+        # btn_box.pack_start(apply_btn, False, False, 0)
 
         discard_btn = self._icon_button("Discard", "document-revert")
         discard_btn.connect("clicked", self.on_discard)
@@ -169,9 +169,18 @@ class App(Gtk.Window):
         if event.keyval == Gdk.KEY_Escape:
             self.on_discard(None)
 
+    def _autosave(self):
+        rows = [(row[0], row[1]) for row in self.store]
+        if apply_to_hosts(rows):
+            self._unsaved_changes = False
+            self.set_status(f"Saved to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>. Please clear your browser cache.", markup=True)
+        else:
+            self.set_status(f"Failed to save to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>", markup=True)
+
     def on_toggled(self, _, path):
         self.store[path][0] = not self.store[path][0]
         self._unsaved_changes = True
+        self._autosave()
 
     def on_mouse_motion(self, widget, event):
         from gi.repository import Gdk
@@ -236,8 +245,7 @@ class App(Gtk.Window):
         is_new = not self.store[path][1]
         self.store[path][1] = new_text
         self._unsaved_changes = True
-        if is_new:
-            self.set_status(f"<i>{GLib.markup_escape_text(new_text)}</i> added. Remember to save.", markup=True)
+        self._autosave()
 
     def on_add(self, _):
         it = self.store.append([True, ""])
@@ -260,7 +268,7 @@ class App(Gtk.Window):
         if dialog.run() == Gtk.ResponseType.YES:
             model.remove(it)
             self._unsaved_changes = True
-            self.set_status(f"<i>{GLib.markup_escape_text(site)}</i> removed. Remember to save.", markup=True)
+            self._autosave()
         dialog.destroy()
 
     def do_close(self):
