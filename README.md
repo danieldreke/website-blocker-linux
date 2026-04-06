@@ -24,14 +24,31 @@ Install PyGObject (GTK3 bindings) on Ubuntu/Linux Mint:
 sudo apt install python3-gi
 ```
 
+## Install (Optional)
+
+```sh
+python3 install.py
+```
+
+Installs to `~/.local/share/website-blocker/` and adds a launcher to your application menu. No root required.
+
+## Uninstall
+
+```sh
+python3 uninstall.py
+```
+
+Removes from application menu and deletes installed files. Does not remove blocked sites from `/etc/hosts` — you must edit it manually to unblock those.
+
 ## Usage
 
-```
-# Normal Start (prompts for root password on save)
+```sh
 python3 website_blocker.py
-# Start with root access (no root password prompt on save)
-sudo python3 website_blocker.py
 ```
+
+Or launch from your application menu after installing.
+
+Saving to `/etc/hosts` requires root — a password prompt will appear on each save.
 
 ## How it works
 
@@ -48,7 +65,7 @@ To allow temporary unblocking, disabled entries are commented out with `#`.
 
 ## Limitations
 
-- For blocking to work in a browser, its DNS cache must be cleared after saving changes.
+- For blocking to work in a browser, its DNS cache must be cleared after changes.
 - Blocks access at the system level — a user can edit `/etc/hosts` directly to bypass it.
 - Browser extensions, VPNs, proxy or private DNS settings can bypass hosts-based blocking.
 - Only blocks the exact domains added. Subdomains (e.g. `sub.example.com`) are not blocked unless added explicitly.
