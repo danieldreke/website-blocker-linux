@@ -103,7 +103,7 @@ class App(Gtk.Window):
 
         toggle_renderer = Gtk.CellRendererToggle()
         toggle_renderer.connect("toggled", self.on_toggled)
-        self.toggle_col = Gtk.TreeViewColumn("", toggle_renderer, active=0)
+        self.toggle_col = Gtk.TreeViewColumn("Block", toggle_renderer, active=0)
         treeview.append_column(self.toggle_col)
 
         self._editing_path = None
@@ -113,7 +113,7 @@ class App(Gtk.Window):
         self.text_renderer.set_property("editable", True)
         self.text_renderer.connect("edited", self.on_edited)
         self.text_renderer.connect("editing-started", self.on_editing_started)
-        self.site_col = Gtk.TreeViewColumn("Blocked Websites")
+        self.site_col = Gtk.TreeViewColumn("Website")
         self.site_col.pack_start(self.prefix_renderer, False)
         self.site_col.pack_start(self.text_renderer, True)
         self.site_col.set_expand(True)
@@ -143,9 +143,9 @@ class App(Gtk.Window):
         add_btn.connect("clicked", self.on_add)
         btn_box.pack_start(add_btn, False, False, 0)
 
-        delete_btn = self._icon_button("Delete", "list-remove")
-        delete_btn.connect("clicked", self.on_delete)
-        btn_box.pack_start(delete_btn, False, False, 0)
+        remove_btn = self._icon_button("Remove", "list-remove")
+        remove_btn.connect("clicked", self.on_remove)
+        btn_box.pack_start(remove_btn, False, False, 0)
 
         spacer = Gtk.Box()
         btn_box.pack_start(spacer, True, True, 0)
@@ -244,7 +244,7 @@ class App(Gtk.Window):
         path = self.store.get_path(it)
         self.treeview.set_cursor(path, self.site_col, True)
 
-    def on_delete(self, _):
+    def on_remove(self, _):
         model, it = self.treeview.get_selection().get_selected()
         if not it:
             return
@@ -253,14 +253,14 @@ class App(Gtk.Window):
             parent=self,
             message_type=Gtk.MessageType.QUESTION,
             buttons=Gtk.ButtonsType.NONE,
-            text=f"Delete {site}?",
+            text=f"Remove {site}?",
         )
         dialog.add_button("Yes", Gtk.ResponseType.YES)
         dialog.add_button("No", Gtk.ResponseType.NO)
         if dialog.run() == Gtk.ResponseType.YES:
             model.remove(it)
             self._unsaved_changes = True
-            self.set_status(f"<i>{GLib.markup_escape_text(site)}</i> deleted. Remember to save.", markup=True)
+            self.set_status(f"<i>{GLib.markup_escape_text(site)}</i> removed. Remember to save.", markup=True)
         dialog.destroy()
 
     def do_close(self):
