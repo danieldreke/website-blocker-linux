@@ -2,8 +2,11 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Pango, GLib
 import re
+import select
+import shlex
 import subprocess
 import tempfile
+import threading
 import os
 
 DEBUG = 0
@@ -52,7 +55,7 @@ def load():
     return rows
 
 
-def apply_to_hosts(rows):
+def apply_to_hosts(rows, root_proc=None):
     with open(HOSTS_FILEPATH) as f:
         content = f.read()
 
@@ -74,9 +77,22 @@ def apply_to_hosts(rows):
         tmp.write(new_content)
         tmp_path = tmp.name
 
-    result = subprocess.run(["pkexec", "cp", tmp_path, HOSTS_FILEPATH])
+    if os.geteuid() == 0:
+        with open(HOSTS_FILEPATH, "w") as f:
+            f.write(new_content)
+        success = True
+    elif root_proc and root_proc.poll() is None:
+        cmd = f"cp {shlex.quote(tmp_path)} {shlex.quote(HOSTS_FILEPATH)} && echo __OK__ || echo __FAIL__\n"
+        root_proc.stdin.write(cmd.encode())
+        root_proc.stdin.flush()
+        ready, _, _ = select.select([root_proc.stdout], [], [], 5)
+        success = b"__OK__" in root_proc.stdout.readline() if ready else False
+    else:
+        result = subprocess.run(["pkexec", "cp", tmp_path, HOSTS_FILEPATH])
+        success = result.returncode == 0
+
     os.unlink(tmp_path)
-    return result.returncode == 0
+    return success
 
 
 class App(Gtk.Window):
@@ -90,6 +106,8 @@ class App(Gtk.Window):
         self.add(box)
 
         self._unsaved_changes = False
+        self._root_proc = None
+        self._unlocked = False
         self.store = Gtk.ListStore(bool, str)
         for row in load():
             self.store.append(list(row))
@@ -98,19 +116,21 @@ class App(Gtk.Window):
         self.treeview = Gtk.TreeView(model=self.store)
         treeview = self.treeview
         treeview.set_headers_visible(True)
-        treeview.connect("row-activated", lambda tv, path, col: self.on_toggled(None, str(path)))
         treeview.connect("motion-notify-event", self.on_mouse_motion)
 
         toggle_renderer = Gtk.CellRendererToggle()
+        toggle_renderer.set_property("activatable", False)
+        toggle_renderer.set_property("sensitive", False)
         toggle_renderer.connect("toggled", self.on_toggled)
         self.toggle_col = Gtk.TreeViewColumn("Block", toggle_renderer, active=0)
+        self.toggle_renderer = toggle_renderer
         treeview.append_column(self.toggle_col)
 
         self._editing_path = None
         self._pending_text = None
         self.prefix_renderer = Gtk.CellRendererText()
         self.text_renderer = Gtk.CellRendererText()
-        self.text_renderer.set_property("editable", True)
+        self.text_renderer.set_property("editable", False)
         self.text_renderer.connect("edited", self.on_edited)
         self.text_renderer.connect("editing-started", self.on_editing_started)
         self.site_col = Gtk.TreeViewColumn("Website")
@@ -139,48 +159,123 @@ class App(Gtk.Window):
         btn_box = Gtk.Box(spacing=6)
         box.pack_start(btn_box, False, False, 0)
 
-        add_btn = self._icon_button("Add", "list-add")
-        add_btn.connect("clicked", self.on_add)
-        btn_box.pack_start(add_btn, False, False, 0)
+        btn_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
-        remove_btn = self._icon_button("Remove", "list-remove")
-        remove_btn.connect("clicked", self.on_remove)
-        btn_box.pack_start(remove_btn, False, False, 0)
+        self.unlock_btn = self._icon_button("Unlock", "\U0001F512")
+        self.unlock_btn.connect("clicked", self.on_unlock)
+        btn_box.pack_start(self.unlock_btn, False, False, 0)
+        btn_size_group.add_widget(self.unlock_btn)
+
+        self.add_btn = self._icon_button("Add", "list-add")
+        self.add_btn.connect("clicked", self.on_add)
+        self.add_btn.set_sensitive(False)
+        btn_box.pack_start(self.add_btn, False, False, 0)
+        btn_size_group.add_widget(self.add_btn)
+
+        self.remove_btn = self._icon_button("Remove", "list-remove")
+        self.remove_btn.connect("clicked", self.on_remove)
+        self.remove_btn.set_sensitive(False)
+        btn_box.pack_start(self.remove_btn, False, False, 0)
+        btn_size_group.add_widget(self.remove_btn)
 
         spacer = Gtk.Box()
         btn_box.pack_start(spacer, True, True, 0)
 
-        apply_btn = self._icon_button("Save", "document-save")
-        apply_btn.connect("clicked", self.on_save)
-        # btn_box.pack_start(apply_btn, False, False, 0)
-
-        discard_btn = self._icon_button("Discard", "document-revert")
-        discard_btn.connect("clicked", self.on_discard)
-        # btn_box.pack_start(discard_btn, False, False, 0)
-
         close_btn = self._icon_button("Close", "window-close")
         close_btn.connect("clicked", lambda _: self.do_close())
         btn_box.pack_start(close_btn, False, False, 0)
+        btn_size_group.add_widget(close_btn)
+        box.set_focus_chain([btn_box, self.scroll])
         self.connect("delete-event", lambda w, e: not self.do_close())
-        self.connect("key-press-event", self.on_window_key)
+        if os.geteuid() == 0:
+            self._on_unlocked()
+        else:
+            self.set_status("Click \U0001F512 Unlock to make changes.")
+            GLib.idle_add(self.unlock_btn.grab_focus)
 
-    def on_window_key(self, _, event):
-        from gi.repository import Gdk
-        if event.keyval == Gdk.KEY_Escape:
-            self.on_discard(None)
+    def _set_btn_content(self, btn, label, icon_name):
+        old = btn.get_child()
+        btn.remove(old)
+        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        inner.set_halign(Gtk.Align.CENTER)
+        inner.pack_start(self._make_icon(icon_name), False, False, 0)
+        inner.pack_start(Gtk.Label(label=label), False, False, 0)
+        btn.add(inner)
+        inner.show_all()
+
+    def _revoke_root(self):
+        if self._root_proc and self._root_proc.poll() is None:
+            self._root_proc.stdin.close()
+        self._root_proc = None
+        self._unlocked = False
+        self.add_btn.set_sensitive(False)
+        self.remove_btn.set_sensitive(False)
+        self.toggle_renderer.set_property("activatable", False)
+        self.toggle_renderer.set_property("sensitive", False)
+        self.text_renderer.set_property("editable", False)
+        self.treeview.queue_draw()
+        self._set_btn_content(self.unlock_btn, "Unlock", "\U0001F512")
+
+    def on_unlock(self, _):
+        if self._root_proc and self._root_proc.poll() is None:
+            self._revoke_root()
+            self.set_status("Root access revoked.")
+        else:
+            self.unlock_btn.set_sensitive(False)
+            self.set_status("Waiting for authentication…")
+            threading.Thread(target=self._unlock_thread, daemon=True).start()
+
+    def _unlock_thread(self):
+        proc = subprocess.Popen(
+            ["pkexec", "/bin/bash"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        proc.stdin.write(b"echo __READY__\n")
+        proc.stdin.flush()
+        line = proc.stdout.readline()
+        if b"__READY__" in line and proc.poll() is None:
+            self._root_proc = proc
+            GLib.idle_add(self._on_unlocked)
+        else:
+            GLib.idle_add(self._on_unlock_failed)
+
+    def _on_unlocked(self):
+        self._unlocked = True
+        self.add_btn.set_sensitive(True)
+        self.remove_btn.set_sensitive(True)
+        self.toggle_renderer.set_property("activatable", True)
+        self.toggle_renderer.set_property("sensitive", True)
+        self.text_renderer.set_property("editable", True)
+        self.treeview.queue_draw()
+        self._set_btn_content(self.unlock_btn, "Lock", "\U0001F513")
+        self.unlock_btn.set_sensitive(True)
+        self.set_status("Root access unlocked.")
+        return False
+
+    def _on_unlock_failed(self):
+        self.unlock_btn.set_sensitive(True)
+        self.unlock_btn.grab_focus()
+        self.set_status("Authentication cancelled.")
+        return False
 
     def _autosave(self):
         rows = [(row[0], row[1]) for row in self.store]
-        if apply_to_hosts(rows):
+        if apply_to_hosts(rows, root_proc=self._root_proc):
             self._unsaved_changes = False
             self.set_status(f"Saved to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>. Please clear your browser cache.", markup=True)
+            return True
         else:
             self.set_status(f"Failed to save to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>", markup=True)
+            return False
 
     def on_toggled(self, _, path):
         self.store[path][0] = not self.store[path][0]
         self._unsaved_changes = True
-        self._autosave()
+        if not self._autosave():
+            self.store[path][0] = not self.store[path][0]
+            self._unsaved_changes = False
 
     def on_mouse_motion(self, widget, event):
         from gi.repository import Gdk
@@ -193,11 +288,11 @@ class App(Gtk.Window):
 
     def _www_prefix_func(self, col, cell, model, it, _):
         cell.set_property("text", "[www.]")
-        cell.set_property("sensitive", model.get_value(it, 0))
+        cell.set_property("sensitive", self._unlocked and model.get_value(it, 0))
 
     def _domain_text_func(self, col, cell, model, it, _):
         cell.set_property("text", model.get_value(it, 1))
-        cell.set_property("sensitive", model.get_value(it, 0))
+        cell.set_property("sensitive", self._unlocked and model.get_value(it, 0))
 
     def on_editing_started(self, _, editable, path):
         self._editing_path = path
@@ -285,39 +380,9 @@ class App(Gtk.Window):
             dialog.destroy()
             if not confirmed:
                 return False
+        self._revoke_root()
         Gtk.main_quit()
         return True
-
-    def on_discard(self, _):
-        if not self._unsaved_changes:
-            self.set_status("No changes to discard.")
-            return
-        dialog = Gtk.MessageDialog(
-            parent=self,
-            message_type=Gtk.MessageType.QUESTION,
-            buttons=Gtk.ButtonsType.NONE,
-            text="Discard all changes?",
-        )
-        dialog.add_button("Yes", Gtk.ResponseType.YES)
-        dialog.add_button("No", Gtk.ResponseType.NO)
-        if dialog.run() == Gtk.ResponseType.YES:
-            self.store.clear()
-            for row in load():
-                self.store.append(list(row))
-            self._unsaved_changes = False
-            self.set_status("Changes discarded.")
-        dialog.destroy()
-
-    def on_save(self, _):
-        if not self._unsaved_changes:
-            self.set_status("No changes to save.")
-            return
-        rows = [(row[0], row[1]) for row in self.store]
-        if apply_to_hosts(rows):
-            self._unsaved_changes = False
-            self.set_status(f"Saved to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>. Please clear your browser cache.", markup=True)
-        else:
-            self.set_status(f"Failed to save to <i>{GLib.markup_escape_text(HOSTS_FILEPATH)}</i>", markup=True)
 
     def set_status(self, message, markup=False):
         if markup:
@@ -325,10 +390,16 @@ class App(Gtk.Window):
         else:
             self.status_label.set_text(message)
 
+    def _make_icon(self, icon_name):
+        if icon_name.isascii():
+            return Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
+        return Gtk.Label(label=icon_name)
+
     def _icon_button(self, label, icon_name):
         btn = Gtk.Button()
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        inner.pack_start(Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON), False, False, 0)
+        inner.set_halign(Gtk.Align.CENTER)
+        inner.pack_start(self._make_icon(icon_name), False, False, 0)
         inner.pack_start(Gtk.Label(label=label), False, False, 0)
         btn.add(inner)
         return btn

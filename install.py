@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import os
-import shutil
 import subprocess
 import stat
 
@@ -23,15 +22,19 @@ Categories=Network;Utility;
 
 LAUNCH_SCRIPT = """\
 #!/bin/bash
-pkexec env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" python3 {app}
+python3 {app}
 """
 
 def main():
     os.makedirs(INSTALL_DIR, exist_ok=True)
     os.makedirs(APPS_DIR, exist_ok=True)
 
-    shutil.copy2(os.path.join(SCRIPT_DIR, "website_blocker.py"), INSTALL_DIR)
-    print(f"Copied website_blocker.py -> {INSTALL_DIR}")
+    src = os.path.join(SCRIPT_DIR, "website_blocker.py")
+    dst = os.path.join(INSTALL_DIR, "website_blocker.py")
+    if os.path.lexists(dst):
+        os.remove(dst)
+    os.symlink(src, dst)
+    print(f"Symlinked website_blocker.py -> {INSTALL_DIR}")
 
     app_path = os.path.join(INSTALL_DIR, "website_blocker.py")
     with open(LAUNCH_SH, "w") as f:

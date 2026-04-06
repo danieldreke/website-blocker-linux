@@ -16,6 +16,8 @@ Changes take effect immediately but browsers may need their DNS cache cleared:
 - Block and unblock websites instantly
 - Unblock websites temporarily via toggle
 - Blocks `www.` variant of each site automatically
+- Starts in read-only mode to see blocked websites.
+- Click <kbd>🔒 Unlock</kbd> to authenticate as root and make changes
 
 ## Requirements
 
@@ -30,7 +32,7 @@ sudo apt install python3-gi
 python3 install.py
 ```
 
-Installs to `~/.local/share/website-blocker/` and adds a launcher to your application menu. No root required.
+Installs to `~/.local/share/website-blocker/` and adds a launcher to your application menu. No root required. The installed file is a symlink, so changes to `website_blocker.py` are reflected immediately without reinstalling.
 
 ## Uninstall
 
@@ -48,7 +50,7 @@ python3 website_blocker.py
 
 Or launch from your application menu after installing.
 
-Saving to `/etc/hosts` requires root — a password prompt will appear on each save.
+Click 🔒 **Unlock** to get root access. A password prompt will appear once — all subsequent saves happen without prompting.
 
 ## How it works
 
