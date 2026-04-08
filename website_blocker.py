@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 import os
+import shutil
 
 DEBUG = 0
 
@@ -24,11 +25,16 @@ MARKER_START = "# --- Website Blocker START ---"
 MARKER_END = "# --- Website Blocker END ---"
 LOOPBACK_IP = "127.0.0.1"
 
+_RESERVED_DOMAINS = {'localhost', '127.0.0.1', '0.0.0.0', '::1'}
+_domain_re = re.compile(
+    r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+)
+
 
 def parse_domain(line):
     if line.startswith(f"{LOOPBACK_IP} "):
-        return line[len(LOOPBACK_IP) + 1:]
-    return line
+        return line[len(LOOPBACK_IP) + 1:].strip()
+    return line.strip()
 
 
 def load():
@@ -78,20 +84,29 @@ def apply_to_hosts(rows, root_proc=None):
 
     new_content = content.rstrip("\n") + "\n\n" + "\n".join(block) + "\n"
 
+    if os.geteuid() == 0:
+        with tempfile.NamedTemporaryFile(mode="w", dir="/etc", delete=False, suffix=".tmp") as tmp:
+            tmp.write(new_content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_etc = tmp.name
+        os.chmod(tmp_etc, 0o644)
+        os.replace(tmp_etc, HOSTS_FILEPATH)
+        return True
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".hosts", delete=False) as tmp:
         tmp.write(new_content)
         tmp_path = tmp.name
 
-    if os.geteuid() == 0:
-        with open(HOSTS_FILEPATH, "w") as f:
-            f.write(new_content)
-        success = True
-    elif root_proc and root_proc.poll() is None:
+    if root_proc and root_proc.poll() is None:
         cmd = f"cp {shlex.quote(tmp_path)} {shlex.quote(HOSTS_FILEPATH)} && echo __OK__ || echo __FAIL__\n"
         root_proc.stdin.write(cmd.encode())
         root_proc.stdin.flush()
         ready, _, _ = select.select([root_proc.stdout], [], [], 5)
-        success = b"__OK__" in root_proc.stdout.readline() if ready else False
+        if ready and root_proc.poll() is None:
+            success = b"__OK__" in root_proc.stdout.readline()
+        else:
+            success = False
     else:
         result = subprocess.run(["pkexec", "cp", tmp_path, HOSTS_FILEPATH])
         success = result.returncode == 0
@@ -136,6 +151,7 @@ class App(Gtk.Window):
         self.prefix_renderer = Gtk.CellRendererText()
         self.text_renderer = Gtk.CellRendererText()
         self.text_renderer.set_property("editable", False)
+        self.text_renderer.set_property("max-width-chars", 253)
         self.text_renderer.connect("edited", self.on_edited)
         self.text_renderer.connect("editing-started", self.on_editing_started)
         self.site_col = Gtk.TreeViewColumn("Website")
@@ -294,6 +310,8 @@ class App(Gtk.Window):
             return False
 
     def on_toggled(self, _, path):
+        if not self._unlocked:
+            return
         self.store[path][0] = not self.store[path][0]
         self._unsaved_changes = True
         if not self._autosave():
@@ -336,10 +354,6 @@ class App(Gtk.Window):
             if path and not self.store[path][1]:
                 self.store.remove(self.store.get_iter(Gtk.TreePath(path)))
 
-    _domain_re = re.compile(
-        r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
-    )
-
     def on_edited(self, _, path, new_text):
         def restart_edit():
             self.treeview.set_cursor(Gtk.TreePath(path), self.site_col, True)
@@ -353,7 +367,10 @@ class App(Gtk.Window):
         if not new_text.strip():
             reject("Empty entry rejected.")
             return
-        if not self._domain_re.match(new_text.strip()):
+        if new_text.strip().lower() in _RESERVED_DOMAINS:
+            reject(f"<i>{GLib.markup_escape_text(new_text)}</i> cannot be blocked.", markup=True)
+            return
+        if not _domain_re.match(new_text.strip()):
             reject(f"<i>{GLib.markup_escape_text(new_text)}</i> is not a valid domain.", markup=True)
             return
         for i, row in enumerate(self.store):
