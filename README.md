@@ -1,5 +1,8 @@
 # Website Blocker for Linux
 
+![Claude](https://img.shields.io/badge/Built_With-Claude-D97757?style=flat&logo=claude&logoColor=D97757)
+<!-- ![Claude](https://img.shields.io/badge/Built_With-Claude-D97757?style=flat&logo=claude&logoColor=D97757&labelColor=fff) -->
+
 Block websites to protect your time and focus. Uses `/etc/hosts` to block sites system-wide.
 
 ![Screenshots](screenshot.png)
@@ -16,8 +19,9 @@ Changes take effect immediately but browsers may need their DNS cache cleared:
 - Block and unblock websites instantly
 - Unblock websites temporarily via toggle
 - Blocks `www.` variant of each site automatically
-- Starts in read-only mode to see blocked websites.
-- Click <kbd>🔒 Unlock</kbd> to authenticate as root and make changes
+- Starts in read-only mode — click 🔒 to make changes (requires root password)
+- Click 🔓 again to return to read-only mode
+<!-- - Changes are saved automatically -->
 
 ## Requirements
 
@@ -50,7 +54,7 @@ python3 website_blocker.py
 
 Or launch from your application menu after installing.
 
-Click 🔒 **Unlock** to get root access. A password prompt will appear once — all subsequent saves happen without prompting.
+Click 🔒 to make changes — a password prompt will appear. Changes are saved automatically. Click 🔓 to return to read-only mode.
 
 ## How it works
 

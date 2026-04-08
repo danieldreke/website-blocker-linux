@@ -3,6 +3,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Pango, GLib
 import re
 import select
+import warnings
 import shlex
 import subprocess
 import tempfile
@@ -13,6 +14,10 @@ DEBUG = 0
 
 WINDOW_WIDTH = 400
 WINDOW_HEIGHT = 300
+
+STATUS_LOCKED = "Click \U0001F512 to make changes."
+STATUS_UNLOCKED = "Click \U0001F513 for read-only mode."
+STATUS_INITIAL = STATUS_LOCKED
 
 HOSTS_FILEPATH = "/etc/hosts"
 MARKER_START = "# --- Website Blocker START ---"
@@ -159,24 +164,26 @@ class App(Gtk.Window):
         btn_box = Gtk.Box(spacing=6)
         box.pack_start(btn_box, False, False, 0)
 
-        btn_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-
-        self.unlock_btn = self._icon_button("Unlock", "\U0001F512")
+        self.unlock_btn = self._icon_button("", "\U0001F512", toggle=True)
         self.unlock_btn.connect("clicked", self.on_unlock)
+        self.unlock_btn.set_tooltip_text(STATUS_LOCKED)
         btn_box.pack_start(self.unlock_btn, False, False, 0)
-        btn_size_group.add_widget(self.unlock_btn)
+
+        btn_box.pack_start(Gtk.Box(), True, True, 0)
+
+        edit_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
         self.add_btn = self._icon_button("Add", "list-add")
         self.add_btn.connect("clicked", self.on_add)
         self.add_btn.set_sensitive(False)
         btn_box.pack_start(self.add_btn, False, False, 0)
-        btn_size_group.add_widget(self.add_btn)
+        edit_size_group.add_widget(self.add_btn)
 
         self.remove_btn = self._icon_button("Remove", "list-remove")
         self.remove_btn.connect("clicked", self.on_remove)
         self.remove_btn.set_sensitive(False)
         btn_box.pack_start(self.remove_btn, False, False, 0)
-        btn_size_group.add_widget(self.remove_btn)
+        edit_size_group.add_widget(self.remove_btn)
 
         spacer = Gtk.Box()
         btn_box.pack_start(spacer, True, True, 0)
@@ -184,13 +191,14 @@ class App(Gtk.Window):
         close_btn = self._icon_button("Close", "window-close")
         close_btn.connect("clicked", lambda _: self.do_close())
         btn_box.pack_start(close_btn, False, False, 0)
-        btn_size_group.add_widget(close_btn)
-        box.set_focus_chain([btn_box, self.scroll])
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            box.set_focus_chain([btn_box, self.scroll])
         self.connect("delete-event", lambda w, e: not self.do_close())
         if os.geteuid() == 0:
             self._on_unlocked()
         else:
-            self.set_status("Click \U0001F512 Unlock to make changes.")
+            self.set_status(STATUS_INITIAL)
             GLib.idle_add(self.unlock_btn.grab_focus)
 
     def _set_btn_content(self, btn, label, icon_name):
@@ -199,7 +207,8 @@ class App(Gtk.Window):
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         inner.set_halign(Gtk.Align.CENTER)
         inner.pack_start(self._make_icon(icon_name), False, False, 0)
-        inner.pack_start(Gtk.Label(label=label), False, False, 0)
+        if label:
+            inner.pack_start(Gtk.Label(label=label), False, False, 0)
         btn.add(inner)
         inner.show_all()
 
@@ -214,16 +223,26 @@ class App(Gtk.Window):
         self.toggle_renderer.set_property("sensitive", False)
         self.text_renderer.set_property("editable", False)
         self.treeview.queue_draw()
-        self._set_btn_content(self.unlock_btn, "Unlock", "\U0001F512")
+        self._set_btn_content(self.unlock_btn, "", "\U0001F512")
+        self._set_unlock_active(False)
+        self.unlock_btn.set_sensitive(True)
+
+    def _set_unlock_active(self, active):
+        self.unlock_btn.handler_block_by_func(self.on_unlock)
+        self.unlock_btn.set_active(active)
+        self.unlock_btn.handler_unblock_by_func(self.on_unlock)
 
     def on_unlock(self, _):
-        if self._root_proc and self._root_proc.poll() is None:
+        if self._unlocked:
             self._revoke_root()
-            self.set_status("Root access revoked.")
-        else:
-            self.unlock_btn.set_sensitive(False)
-            self.set_status("Waiting for authentication…")
-            threading.Thread(target=self._unlock_thread, daemon=True).start()
+            self.unlock_btn.set_tooltip_text(STATUS_LOCKED)
+            self.set_status(STATUS_LOCKED)
+            GLib.idle_add(self.unlock_btn.grab_focus)
+            return
+        self._set_unlock_active(False)
+        self.unlock_btn.set_sensitive(False)
+        self.set_status("Waiting for authentication…")
+        threading.Thread(target=self._unlock_thread, daemon=True).start()
 
     def _unlock_thread(self):
         proc = subprocess.Popen(
@@ -235,7 +254,7 @@ class App(Gtk.Window):
         proc.stdin.write(b"echo __READY__\n")
         proc.stdin.flush()
         line = proc.stdout.readline()
-        if b"__READY__" in line and proc.poll() is None:
+        if (b"__READY__" in line and proc.poll() is None) or DEBUG:
             self._root_proc = proc
             GLib.idle_add(self._on_unlocked)
         else:
@@ -249,15 +268,19 @@ class App(Gtk.Window):
         self.toggle_renderer.set_property("sensitive", True)
         self.text_renderer.set_property("editable", True)
         self.treeview.queue_draw()
-        self._set_btn_content(self.unlock_btn, "Lock", "\U0001F513")
+        self._set_btn_content(self.unlock_btn, "", "\U0001F513")
+        self._set_unlock_active(True)
         self.unlock_btn.set_sensitive(True)
-        self.set_status("Root access unlocked.")
+        self.unlock_btn.set_tooltip_text(STATUS_UNLOCKED)
+        self.set_status(STATUS_UNLOCKED)
+        # GLib.timeout_add(2000, lambda: self.set_status(STATUS_UNLOCKED_HINT) or False)
+        GLib.idle_add(self.unlock_btn.grab_focus)
         return False
 
     def _on_unlock_failed(self):
         self.unlock_btn.set_sensitive(True)
-        self.unlock_btn.grab_focus()
         self.set_status("Authentication cancelled.")
+        GLib.idle_add(self.unlock_btn.grab_focus)
         return False
 
     def _autosave(self):
@@ -395,25 +418,25 @@ class App(Gtk.Window):
             return Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.BUTTON)
         return Gtk.Label(label=icon_name)
 
-    def _icon_button(self, label, icon_name):
-        btn = Gtk.Button()
+    def _icon_button(self, label, icon_name, toggle=False):
+        btn = Gtk.ToggleButton() if toggle else Gtk.Button()
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         inner.set_halign(Gtk.Align.CENTER)
         inner.pack_start(self._make_icon(icon_name), False, False, 0)
-        inner.pack_start(Gtk.Label(label=label), False, False, 0)
+        if label:
+            inner.pack_start(Gtk.Label(label=label), False, False, 0)
         btn.add(inner)
         return btn
 
 
 def on_resize(window, event):
     if DEBUG:
+        if not win._unlocked and event.width == WINDOW_WIDTH and event.height == WINDOW_HEIGHT:
+            return
         win.set_status(f"Window size: {event.width}×{event.height}")
 
 win = App()
 win.connect("destroy", Gtk.main_quit)
 win.connect("configure-event", on_resize)
 win.show_all()
-if DEBUG:
-    w, h = win.get_size()
-    win.set_status(f"Window size: {w}×{h}")
 Gtk.main()
