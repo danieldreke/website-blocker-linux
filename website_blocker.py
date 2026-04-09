@@ -136,6 +136,7 @@ class App(Gtk.Window):
         self.treeview = Gtk.TreeView(model=self.store)
         treeview = self.treeview
         treeview.set_headers_visible(True)
+        treeview.get_selection().set_mode(Gtk.SelectionMode.NONE)
         treeview.connect("motion-notify-event", self.on_mouse_motion)
 
         toggle_renderer = Gtk.CellRendererToggle()
@@ -238,6 +239,7 @@ class App(Gtk.Window):
         self.toggle_renderer.set_property("activatable", False)
         self.toggle_renderer.set_property("sensitive", False)
         self.text_renderer.set_property("editable", False)
+        self.treeview.get_selection().set_mode(Gtk.SelectionMode.NONE)
         self.treeview.queue_draw()
         self._set_btn_content(self.unlock_btn, "", "\U0001F512")
         self._set_unlock_active(False)
@@ -283,6 +285,7 @@ class App(Gtk.Window):
         self.toggle_renderer.set_property("activatable", True)
         self.toggle_renderer.set_property("sensitive", True)
         self.text_renderer.set_property("editable", True)
+        self.treeview.get_selection().set_mode(Gtk.SelectionMode.SINGLE)
         self.treeview.queue_draw()
         self._set_btn_content(self.unlock_btn, "", "\U0001F513")
         self._set_unlock_active(True)
