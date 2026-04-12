@@ -24,6 +24,7 @@ HOSTS_FILEPATH = "/etc/hosts"
 MARKER_START = "# --- Website Blocker START ---"
 MARKER_END = "# --- Website Blocker END ---"
 LOOPBACK_IP = "127.0.0.1"
+INACTIVITY_AUTOLOCK_IN_SECONDS = 300  # seconds before auto-lock
 
 _RESERVED_DOMAINS = {'localhost', '127.0.0.1', '0.0.0.0', '::1'}
 _domain_re = re.compile(
@@ -128,6 +129,8 @@ class App(Gtk.Window):
         self._unsaved_changes = False
         self._root_proc = None
         self._unlocked = False
+        self._autolock_timer = None
+        self._seconds_until_autolock = 0
         self.store = Gtk.ListStore(bool, str)
         for row in load():
             self.store.append(list(row))
@@ -230,6 +233,9 @@ class App(Gtk.Window):
         inner.show_all()
 
     def _revoke_root(self):
+        if self._autolock_timer:
+            GLib.source_remove(self._autolock_timer)
+            self._autolock_timer = None
         if self._root_proc and self._root_proc.poll() is None:
             self._root_proc.stdin.close()
         self._root_proc = None
@@ -244,6 +250,25 @@ class App(Gtk.Window):
         self._set_btn_content(self.unlock_btn, "", "\U0001F512")
         self._set_unlock_active(False)
         self.unlock_btn.set_sensitive(True)
+
+    def _restart_autolock_timer(self):
+        if self._autolock_timer:
+            GLib.source_remove(self._autolock_timer)
+        self._seconds_until_autolock = INACTIVITY_AUTOLOCK_IN_SECONDS
+        self._autolock_timer = GLib.timeout_add_seconds(1, self._on_autolock_timer_tick)
+
+    def _on_autolock_timer_tick(self):
+        self._seconds_until_autolock -= 1
+        if self._seconds_until_autolock <= 0:
+            self._autolock_timer = None
+            self._revoke_root()
+            self.set_status(STATUS_LOCKED)
+            GLib.idle_add(self.unlock_btn.grab_focus)
+            return False
+        r = self._seconds_until_autolock
+        if r < 30:
+            self.set_status(f"Due to inactivity, switching to read-only in {r}s…")
+        return True
 
     def _set_unlock_active(self, active):
         self.unlock_btn.handler_block_by_func(self.on_unlock)
@@ -292,7 +317,7 @@ class App(Gtk.Window):
         self.unlock_btn.set_sensitive(True)
         self.unlock_btn.set_tooltip_text(STATUS_UNLOCKED)
         self.set_status(STATUS_UNLOCKED)
-        # GLib.timeout_add(2000, lambda: self.set_status(STATUS_UNLOCKED_HINT) or False)
+        self._restart_autolock_timer()
         GLib.idle_add(self.unlock_btn.grab_focus)
         return False
 
@@ -315,6 +340,7 @@ class App(Gtk.Window):
     def on_toggled(self, _, path):
         if not self._unlocked:
             return
+        self._restart_autolock_timer()
         self.store[path][0] = not self.store[path][0]
         self._unsaved_changes = True
         if not self._autosave():
@@ -383,9 +409,11 @@ class App(Gtk.Window):
         is_new = not self.store[path][1]
         self.store[path][1] = new_text
         self._unsaved_changes = True
+        self._restart_autolock_timer()
         self._autosave()
 
     def on_add(self, _):
+        self._restart_autolock_timer()
         it = self.store.append([True, ""])
         path = self.store.get_path(it)
         self.treeview.set_cursor(path, self.site_col, True)
@@ -406,6 +434,7 @@ class App(Gtk.Window):
         if dialog.run() == Gtk.ResponseType.YES:
             model.remove(it)
             self._unsaved_changes = True
+            self._restart_autolock_timer()
             self._autosave()
         dialog.destroy()
 

@@ -20,8 +20,9 @@ Changes take effect immediately but browsers may need their DNS cache cleared:
 - Unblock websites temporarily via toggle
 - Blocks `www.` variant of each site automatically
 - Starts in read-only mode — click 🔒 to make changes (requires root password)
-- Click 🔓 again to return to read-only mode
-<!-- - Changes are saved automatically -->
+- Click 🔓 to return to read-only mode
+- Automatically returns to read-only mode after user inactivity
+- Changes are saved automatically
 
 ## Requirements
 
@@ -55,6 +56,7 @@ python3 website_blocker.py
 Or launch from your application menu after installing.
 
 Click 🔒 to make changes — a password prompt will appear. Changes are saved automatically. Click 🔓 to return to read-only mode.
+The app will return to read-only mode automatically if there’s no user activity for a while.
 
 ## How it works
 
