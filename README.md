@@ -1,7 +1,6 @@
 # Website Blocker for Linux
 
-![Claude](https://img.shields.io/badge/Built_With-Claude-D97757?style=flat&logo=claude&logoColor=D97757)
-<!-- ![Claude](https://img.shields.io/badge/Built_With-Claude-D97757?style=flat&logo=claude&logoColor=D97757&labelColor=fff) -->
+![Claude](https://img.shields.io/badge/Built_With-Claude-D97757?style=flat&logo=claude&logoColor=D97757) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Block websites to protect your time and focus. Uses `/etc/hosts` to block sites system-wide.
 
